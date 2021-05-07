@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<module>
+	<name>uploadproductsfromfile</name>
+	<displayName><![CDATA[Upload products from file]]></displayName>
+	<version><![CDATA[1.0.0]]></version>
+	<description><![CDATA[This module lets you to create products on PrestaShop uploading a csv file]]></description>
+	<author><![CDATA[DAMIANO BERTUNA]]></author>
+	<tab><![CDATA[administration]]></tab>
+	<is_configurable>1</is_configurable>
+	<need_instance>1</need_instance>
+</module>

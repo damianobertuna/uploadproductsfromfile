@@ -41,10 +41,6 @@ class Uploadproductsfromfile extends Module
         $this->version = '1.0.0';
         $this->author = 'DAMIANO BERTUNA';
         $this->need_instance = 0;
-
-        /**
-         * Set $this->bootstrap to true if your module is compliant with bootstrap (PrestaShop 1.6)
-         */
         $this->bootstrap = true;
         $this->_html = '';
 
@@ -56,10 +52,6 @@ class Uploadproductsfromfile extends Module
         $this->ps_versions_compliancy = array('min' => '1.7', 'max' => _PS_VERSION_);
     }
 
-    /**
-     * Don't forget to create update methods if needed:
-     * http://doc.prestashop.com/display/PS16/Enabling+the+Auto-Update
-     */
     public function install()
     {
         Configuration::updateValue('UPLOADPRODUCTSFROMFILE_PRODUCTS_FILE', false);
@@ -80,13 +72,7 @@ class Uploadproductsfromfile extends Module
      */
     public function getContent()
     {
-        /**
-         * If values have been submitted in the form, process.
-         */
-        
         if (((bool)Tools::isSubmit('submitUploadproductsfromfileModule')) == true) {
-            //$this->postProcess();
-            
             //file upload code
 			if (isset($_FILES['UPLOADPRODUCTSFROMFILE_PRODUCTS_FILE'])) {
 				$target_dir = _PS_UPLOAD_DIR_;
@@ -96,6 +82,7 @@ class Uploadproductsfromfile extends Module
 				$uploadStatus = true;
                 $fileType = pathinfo($target_file,PATHINFO_EXTENSION);
 
+                // only csv accepted
                 if ($fileType != "csv") {
                     $this->_html .= $this->displayError($this->trans('Only CSV files are supported', array(), 'Admin.Notifications.Error'));
 					$uploadStatus = false;
@@ -111,8 +98,6 @@ class Uploadproductsfromfile extends Module
                         } else {
                             $this->_html .= $this->displayError($this->trans('Columns in file not as expected', array(), 'Admin.Notifications.Error'));
                         }
-
-                        
 					} else {
 						$this->_html .= $this->displayError($this->trans('Problem uplaoding the file', array(), 'Admin.Notifications.Error'));
 					}
@@ -122,16 +107,14 @@ class Uploadproductsfromfile extends Module
         }
 
         $this->context->smarty->assign('module_dir', $this->_path);
-
         $output = $this->context->smarty->fetch($this->local_path.'views/templates/admin/configure.tpl');
         $output .= $this->_html;
         $output .= $this->renderForm();
-        
         return $output;
     }
 
     /**
-     * Create the form that will be displayed in the configuration of your module.
+     * Create the form that will be displayed in the configuration of the module.
      */
     protected function renderForm()
     {
@@ -159,7 +142,7 @@ class Uploadproductsfromfile extends Module
     }
 
     /**
-     * Create the structure of your form.
+     * Create the structure of the form.
      */
     protected function getConfigForm()
     {
@@ -217,35 +200,47 @@ class Uploadproductsfromfile extends Module
     /**
     * Add the CSS & JavaScript files you want to be loaded in the BO.
     */
-    public function hookBackOfficeHeader()
+    /*public function hookBackOfficeHeader()
     {
         if (Tools::getValue('module_name') == $this->name) {
             $this->context->controller->addJS($this->_path.'views/js/back.js');
             $this->context->controller->addCSS($this->_path.'views/css/back.css');
         }
-    }
+    }*/
 
     /**
      * Add the CSS & JavaScript files you want to be added on the FO.
      */
-    public function hookHeader()
+    /*public function hookHeader()
     {
         $this->context->controller->addJS($this->_path.'/views/js/front.js');
         $this->context->controller->addCSS($this->_path.'/views/css/front.css');
-    }
+    }*/
 
+    /*
+    * function that process the csv uploaded by the user
+    */
     private function processCsvFile($csvFile) {
         $utilsObj = new Utils();
         $row = 0;
+
         if (($handle = fopen($csvFile, "r")) !== FALSE) {
-            while (($data = fgetcsv($handle, 1000, ",")) !== FALSE) {     
+            while (($data = fgetcsv($handle, 1000, ",")) !== FALSE) {
+                // check columns number
                 if (count($data) != 9) {
                     return false;
                 }
                 
                 if ($row > 0) {
-                    $productName                            = [$this->context->language->id => $data[0]];
-                    $productLinkRewrite                     = [$this->context->language->id => Tools::str2url($data[0])];                    
+                    $activeLanguages                        = $this->context->controller->getLanguages();
+                    $nameArray = array();
+                    $linkRewriteArray = array();
+                    foreach ($activeLanguages as $language) {                
+                        $nameArray[$language["id_lang"]] = $data[0];
+                        $linkRewriteArray[$language["id_lang"]] = Tools::str2url($data[0]);
+                    }
+                    $productName                            = $nameArray;
+                    $productLinkRewrite                     = $linkRewriteArray;
                     $productReference                       = $data[1];
                     $productEan13                           = $data[2];
                     $productCostPrice                       = floatval($data[3]);
@@ -253,7 +248,10 @@ class Uploadproductsfromfile extends Module
                     $productTaxRate                         = floatval($data[5]);
                     $productQuantity                        = intval($data[6]);
                     $productCategories                      = $data[7];
-                    $categoriesIdArray                      = $utilsObj->createCategories($productCategories, $this->context->language->id);
+                    $categoriesIdArray                      = array();
+                    if ($productCategories != "") {
+                        $categoriesIdArray                      = $utilsObj->createCategories($productCategories, $activeLanguages, $this->context->language->id);
+                    }
                     $productManufacturer                    = $data[8];
 
                     $productObj                             = new Product();
@@ -264,18 +262,24 @@ class Uploadproductsfromfile extends Module
                     $productObj->ean13                      = $productEan13;
                     $productObj->wholesale_price            = $productCostPrice;
                     $productObj->quantity                   = $productQuantity;
-                    $taxId                                  = $utilsObj->getTaxId($productTaxRate, $this->context->language->id);
+                    if ($productTaxRate != "") {
+                        $taxId                                  = $utilsObj->getTaxId($productTaxRate, $activeLanguages, $this->context->language->id);
+                    }
+
                     if ($taxId) {
                         $productObj->id_tax_rules_group     = $taxId;
                     }
 
+                    // Home is assigned by default
                     if (count($categoriesIdArray) == 0) {
                         $categoriesIdArray[]                = 2;
                     } else {
+                        // home is the root category
                         array_unshift($categoriesIdArray , 2);
                     }
 
                     $productObj->id_category            = $categoriesIdArray;
+                    // the last category is the default one
                     $productObj->id_category_default    = $categoriesIdArray[count($categoriesIdArray)-1];
 
                     if ($productManufacturer != "") {

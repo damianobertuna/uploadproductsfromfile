@@ -5,12 +5,12 @@ class Utils {
     public function __construct() {
     }
 
-    public function createCategories($categories, $languageId) {
+    public function createCategories($categories, $activeLanguages, $languageId) {
         // create array with all categories
         $categoriesArray = explode(";", $categories);
         $categoriesId = array();
 
-        $idParentCategory = "";
+        $idParentCategory = 2;   
         // for each category check if exist otherwise create it
         foreach ($categoriesArray as $categoryName) {
             if ( $categoryName == "") {
@@ -18,10 +18,10 @@ class Utils {
             }
 
             $categoryObj = new Category();
-            //echo "<pre>";
-            //var_dump($categoryName);
-            $categoryExists = $categoryObj->searchByName($languageId, $categoryName, true, true);
-
+            // check if the category exists
+            //$categoryExists = $categoryObj->searchByName($languageId, $categoryName, true, true);
+            $categoryExists = $this->searchByNameCustom($languageId, $categoryName, $idParentCategory);
+            
             if ($categoryExists != false && count($categoryExists) > 0) {
                 $categoriesId[]                 = $categoryExists["id_category"];
                 $idParentCategory               = $categoryExists["id_category"];
@@ -30,16 +30,12 @@ class Utils {
                 $link                           = Tools::link_rewrite($categoryName);
                 $categoryObj->active            = 1;                
                 $categoryObj->name              = array();
-                $categoryObj->name[1]           = $categoryName;
-                $categoryObj->name[2]           = $categoryName;
                 $categoryObj->link_rewrite      = array();
-                $category->link_rewrite[1]      = $link;
-                $categoryObj->link_rewrite[2]   = $link;                
-                
-                $categoryObj->id_parent    = $idParentCategory;
-                if ($idParentCategory == "") {
-                    $categoryObj->id_parent     = 2;                    
-                }
+                foreach ($activeLanguages as $language) {
+                    $categoryObj->name[$language["id_lang"]] = $categoryName;
+                    $categoryObj->link_rewrite[$language["id_lang"]] = $link;
+                }                                
+                $categoryObj->id_parent         = $idParentCategory;
 
                 $res                            = $categoryObj->add();
                 $categoriesId[]                 = intval($categoryObj->id);
@@ -49,83 +45,45 @@ class Utils {
         return $categoriesId;
     }
 
-    public function getTaxId($productTaxRate, $languageId) {
+    public function getTaxId($productTaxRate, $activeLanguages, $languageId) {
+        $name_tax                   = 'Import module tax ('. $productTaxRate .'%)';
+        $tax                        = new Tax();
 
-        $name_tax = 'Import module tax ('. $productTaxRate .'%)';
-
-        $tax = new Tax();
-
+        // check if this tax exists
         $id_tax = $tax->getTaxIdByName($name_tax);
 
         if(!$id_tax){
-            $tax->name =  array($languageId => $name_tax);
-            $tax->rate = floatval($productTaxRate);
-            $tax->active = 1;
+            // create tax
+            $nameArray = array();
+            foreach ($activeLanguages as $language) {                
+                $nameArray[$language["id_lang"]]          = $name_tax;
+            }
+            $tax->name              = $nameArray;
+            $tax->rate              = floatval($productTaxRate);
+            $tax->active            = 1;
             if($tax->id ){
                 $tax->setFieldsToUpdate($tax->getFieldsShop());
             }
             $tax->save();
             
-            $tax_rule_group = new TaxRulesGroup();
-            $tax_rule_group->name = $name_tax; //array($languageId => $name_tax);
+            // create tax rule group
+            $tax_rule_group         = new TaxRulesGroup();
+            $tax_rule_group->name   = $name_tax; //array($languageId => $name_tax);
             $tax_rule_group->active = 1;
             if($tax_rule_group->id ){
                 $tax_rule_group->setFieldsToUpdate($tax_rule_group->getFieldsShop());
             }
             $tax_rule_group->save();
 
-
             $this->createRule($tax->id, $tax_rule_group->id, $languageId);
             return $tax_rule_group->id;
         } else {
+            // if the tax exists get the id_tax_rules_group from database
             $db = Db::getInstance();
             $sql = 'SELECT id_tax_rules_group FROM `' . _DB_PREFIX_ . 'tax_rule` WHERE id_tax = '.pSQL(intval($id_tax)).' LIMIT 1';            
             $taxRulesGroupId = $db->executeS($sql);
             
             return $taxRulesGroupId[0]["id_tax_rules_group"];
-        }
-
-
-
-
-
-
-
-        $sql = 'SELECT id_tax FROM `' . _DB_PREFIX_ . 'tax` WHERE rate = "'.pSQL($productTaxRate).'.000" LIMIT 1';
-        $db = Db::getInstance();
-        $taxId = $db->executeS($sql);
-        $name_tax = 'Import module tax ('. $productTaxRate .'%)';
-        
-        if (count($taxId) > 0) {
-            $taxId = $taxId[0]["id_tax"];
-
-            $sql = 'SELECT id_tax_rules_group FROM `' . _DB_PREFIX_ . 'tax_rule` WHERE id_tax = '.pSQL(intval($taxId)).' LIMIT 1';
-            $taxRulesGroupId = $db->executeS($sql);
-            echo "<br />";
-            var_dump($taxRulesGroupId);
-            exit();
-            return $taxId;
-        } else {
-            return false;
-            /*$name_tax = 'Import module tax ('. $productTaxRate .'%)';
-            var_dump($name_tax);
-            exit();
-            $tax = new Tax();
-            $tax->name =  $name_tax;
-            $tax->rate = floatval($productTaxRate);
-            $tax->active = 1;
-            if( $this->_idShop == null && $tax->id ){
-              $tax->setFieldsToUpdate($tax->getFieldsShop());
-            }
-            $tax->save();
-            $tax_rule_group = new TaxRulesGroup();
-            $tax_rule_group->name =  $name_tax;
-            $tax_rule_group->active = 1;
-            if( $this->_idShop == null && $tax_rule_group->id ){
-              $tax_rule_group->setFieldsToUpdate($tax_rule_group->getFieldsShop());
-            }
-            $tax_rule_group->save();
-            return $tax->id;*/
         }
     }
 
@@ -142,8 +100,7 @@ class Utils {
         return $manufacturerId;
     }
 
-
-
+    // this functions create tax_rule for the tax and tax_group created
     private function createRule($id_tax, $id_tax_rules_group, $languageId) {
         $zip_code = 0;
         $id_rule = (int)0;
@@ -172,7 +129,6 @@ class Utils {
                 }
                 $tr = new TaxRule();
 
-                // update or creation?
                 if (isset($id_rule) && $first) {
                     $tr->id = $id_rule;
                     $first = false;
@@ -208,8 +164,6 @@ class Utils {
                 $tax_rule = $tr;
 
                 if (count($errors) == 0) {
-                    //$tax_rules_group = $this->updateTaxRulesGroup($tax_rules_group);
-            
                     if( $tr->id ){
                         $tr->setFieldsToUpdate($tr->getFieldsShop());
                     }
@@ -219,8 +173,18 @@ class Utils {
                 }
             }
         }
-  }
+    }
 
+    private function searchByNameCustom($languageId, $categoryName, $idParentCategory)
+    {
+        $sql = new DbQuery();
+        $sql->select('c.*, cl.*');
+        $sql->from('category', 'c');
+        $sql->leftJoin('category_lang', 'cl', 'c.`id_category` = cl.`id_category` ' . Shop::addSqlRestrictionOnLang('cl'));
+        $sql->where('`name` = \'' . pSQL($categoryName) . '\' AND id_parent = '.pSQL(intval($idParentCategory)));
+        $categories = Db::getInstance(_PS_USE_SQL_SLAVE_)->getRow($sql);
+        return $categories;
+    }
 }
 
 ?>
